@@ -113,7 +113,48 @@ def table_links_only(tag, keywords):
     return "<table><thead><tr><th>Búsqueda</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+"".join(rows)+"</tbody></table>"
 
 def main():
-    cfg=json.load(open(CONFIG_PATH,"r",encoding="utf-8"))
+    def _default_cfg():
+    return {
+        "amazon_partner_tag": "tu-tag-21",
+        "amazon_access_key": "",
+        "amazon_secret_key": "",
+        "site_title": "AutoNicho",
+        "categories": [
+            {
+                "slug":"hidrolimpiadoras",
+                "title":"Mejores hidrolimpiadoras 2025",
+                "keywords":["hidrolimpiadora 140 bar","karcher k4","hidrolimpiadora domestica"]
+            }
+        ]
+    }
+
+def _clean_json(raw: str) -> str:
+    s = raw.strip()
+    # elimina fences de markdown ```json ... ```
+    if s.startswith("```"):
+        s = s.lstrip("`")
+        nl = s.find("\n")
+        if nl != -1:
+            s = s[nl+1:]
+        if s.endswith("```"):
+            s = s[:-3]
+    # comillas “ ” y ‘ ’ -> "
+    s = s.replace("“","\"").replace("”","\"").replace("‘","\"").replace("’","\"")
+    # comillas simples -> dobles (aproximado; basta para claves/valores simples)
+    if s.count('"') == 0 and "'" in s:
+        s = s.replace("'", "\"")
+    return s
+
+try:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        raw = f.read()
+    try:
+        cfg = json.loads(raw)
+    except Exception:
+        cfg = json.loads(_clean_json(raw))
+except Exception:
+    cfg = _default_cfg()
+
     tag=cfg.get("amazon_partner_tag","").strip()
     access=cfg.get("amazon_access_key","").strip()
     secret=cfg.get("amazon_secret_key","").strip()
