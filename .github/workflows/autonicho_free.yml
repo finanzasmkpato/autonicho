@@ -36,6 +36,14 @@ jobs:
           AMAZON_PARTNER_TAG: ${{ secrets.AMAZON_PARTNER_TAG }}
           CLOUDFLARE_WEB_ANALYTICS_TOKEN: ${{ secrets.CLOUDFLARE_WEB_ANALYTICS_TOKEN }}
         run: python automation/generate_free.py
+- name: Debug tree
+  run: |
+    echo "== Raíz del repo =="
+    ls -la
+    echo "== Contenido de /public =="
+    ls -la public || true
+    echo "== Archivos HTML encontrados =="
+    find public -maxdepth 2 -name "index.html" -print || true
 
       - name: Commit & Push
         run: |
