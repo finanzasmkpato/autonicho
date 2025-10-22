@@ -32,6 +32,16 @@ jobs:
           git add -A
           git commit -m "chore: publish content [free edition][skip ci]" || echo "No changes"
           git push || true
+      - name: Diagnose Cloudflare API
+  env:
+    CF_API: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    CF_ACC: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  run: |
+    set -e
+    echo "== Listando projects en la cuenta =="
+    curl -s -H "Authorization: Bearer $CF_API" \
+      "https://api.cloudflare.com/client/v4/accounts/$CF_ACC/pages/projects" | head -c 1500; echo
+
       - name: Publish to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
