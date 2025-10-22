@@ -1,0 +1,8 @@
+name='autonicho-worker'
+main='worker.js'
+compatibility_date='2024-10-01'
+
+kv_namespaces=[{binding='KV',id:'<KV_NAMESPACE_ID>'}]
+
+[vars]
+AFFIL_TAG='<TU_TAG>'
