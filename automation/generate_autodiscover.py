@@ -527,14 +527,15 @@ def write_post_from_keyword(cfg, cat_slug, kw):
         if len(related)>=3: break
 
     head=head_meta(h1, f"Guía y comparativa de {h1}", BASE_URL+slug+"/" if BASE_URL else "", BASE_PATH, CFG["site_title"])
-    html=POST_TMPL.render(
-        head=head, h1=h1, updated=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
-        image=image, intro=intro, tipo=tipo, rango_precio=rango, perfil=perfil, criterio=criterio,
-        table=table_html, bloques=bloques, buyer_intro=buyer_intro, tips=tips,
-        pros=pros, contras=contras, faqs=faxs := faqs, related=related,
-        product_ld=product_json_ld, faq_ld=faq_json_ld,
-        root=BASE_PATH, tail=tail_meta(CFG["legal"]["disclosure"], CFG["site_title"])
-    )
+    html = POST_TMPL.render(
+    head=head, h1=h1, updated=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+    image=image, intro=intro, tipo=tipo, rango_precio=rango, perfil=perfil, criterio=criterio,
+    table=table_html, bloques=bloques, buyer_intro=buyer_intro, tips=tips,
+    pros=pros, contras=contras, faqs=faqs, related=related,
+    product_ld=product_json_ld, faq_ld=faq_json_ld,
+    root=BASE_PATH, tail=tail_meta(CFG["legal"]["disclosure"], CFG["site_title"])
+)
+
     write(f"{slug}/index.html", html)
     return slug, h1
 
