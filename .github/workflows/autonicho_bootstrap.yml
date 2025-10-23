@@ -36,6 +36,22 @@ jobs:
           mkdir -p automation
           printf '%s' "${{ secrets.BOOTSTRAP_JSON }}" > automation/bootstrap.json
 
+      - name: Validate BOOTSTRAP_JSON (best-effort)
+        env:
+          RAW: ${{ secrets.BOOTSTRAP_JSON }}
+        run: |
+          python - <<'PY'
+          import json, os
+          raw=os.environ.get('RAW','').strip()
+          if not raw:
+              print('ERROR: BOOTSTRAP_JSON está vacío'); raise SystemExit(1)
+          try:
+              json.loads(raw)
+              print('OK: JSON válido')
+          except Exception as e:
+              print('AVISO: JSON inválido, el script intentará limpiarlo ->', e)
+          PY
+
       - name: Generate site
         env:
           BOOTSTRAP_JSON_PATH: automation/bootstrap.json
