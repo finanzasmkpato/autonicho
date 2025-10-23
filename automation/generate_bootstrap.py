@@ -1,4 +1,4 @@
-# automation/generate_bootstrap.py (VERSION RUTAS RELATIVAS PARA GITHUB PAGES)
+# automation/generate_bootstrap.py — version rutas relativas OK en GitHub Pages
 
 import os, json, re, datetime, hashlib, hmac, requests
 from jinja2 import Template
@@ -6,12 +6,12 @@ from jinja2 import Template
 CONFIG_PATH = os.environ.get("BOOTSTRAP_JSON_PATH", "automation/bootstrap.json")
 os.makedirs("public/static", exist_ok=True)
 
-HEAD = """<!doctype html><html lang="es"><head>
+BASE_HEAD = """<!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ title_tag }}</title>
 <meta name="description" content="{{ meta_description }}">
-<link rel="stylesheet" href="static/style.css">  <!-- RUTA RELATIVA -->
-</head><body><header><a href="./">AutoNicho</a></header><main>"""  # ./ en vez de /
+<link rel="stylesheet" href="{{ base }}static/style.css">
+</head><body><header><a href="{{ base }}">AutoNicho</a></header><main>"""
 TAIL = """</main><footer><p>(c) AutoNicho - Enlaces patrocinados (afiliado).</p></footer></body></html>"""
 
 POST_TMPL = Template("""{{ head }}
@@ -22,18 +22,27 @@ POST_TMPL = Template("""{{ head }}
 <section><h2>Cómo elegir</h2><ul>{% for t in tips %}<li>{{ t }}</li>{% endfor %}</ul></section>
 <section><h2>Preguntas frecuentes</h2>{% for q,a in faqs %}<h3>{{ q }}</h3><p>{{ a }}</p>{% endfor %}</section>
 <nav><p>También puede interesarte:
-{% for slug, title in related %}<a href="../{{ slug }}/">{{ title }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p></nav>  <!-- ../ relativo -->
+{% for slug, title in related %}<a href="{{ base }}{{ slug }}/">{{ title }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p></nav>
 </article>{{ tail }}""")
 
 INDEX_TMPL = Template("""{{ head }}
 <h1>{{ site_title }}</h1>
 <ul>
 {% for slug, title, desc in posts %}
-<li><a href="{{ slug }}/">{{ title }}</a><br><small>{{ desc }}</small></li>  <!-- relativo -->
+<li><a href="{{ base }}{{ slug }}/">{{ title }}</a><br><small>{{ desc }}</small></li>
 {% endfor %}
 </ul>{{ tail }}""")
 
-STYLE = "body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:0;line-height:1.6}header,footer{background:#f6f6f7;padding:12px 16px}main{max-width:920px;margin:0 auto;padding:16px}table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #ddd;padding:8px;text-align:left}.bb-btn{display:inline-block;padding:8px 12px;border:1px solid #111;border-radius:8px;text-decoration:none}.bb-price{font-weight:600}"
+STYLE = """
+body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:0;line-height:1.6;color:#111;background:#fff}
+header,footer{background:#f6f6f7;padding:12px 16px}
+main{max-width:920px;margin:0 auto;padding:16px}
+h1,h2{line-height:1.2}
+table{width:100%;border-collapse:collapse;margin:16px 0}
+th,td{border:1px solid #ddd;padding:8px;text-align:left}
+.bb-btn{display:inline-block;padding:8px 12px;border:1px solid #111;border-radius:8px;text-decoration:none}
+.bb-price{font-weight:600}
+"""
 
 def write(path, content):
     path = os.path.join("public", path.lstrip("/"))
@@ -55,7 +64,7 @@ def load_posts_list():
 # ---------- Carga robusta de config ----------
 def _default_cfg():
     return {
-        "amazon_partner_tag": "tu-tag-21",
+        "amazon_partner_tag": "elgatovegano-21",
         "amazon_access_key": "",
         "amazon_secret_key": "",
         "site_title": "AutoNicho",
@@ -121,7 +130,7 @@ def paapi_search_items(tag, kw, access, secret, count=10):
     target="com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems"
     return _pa_call("/paapi5/searchitems", payload, target, access, secret)
 
-# ---------- Generación de tablas ----------
+# ---------- Tablas ----------
 def table_from_items(items, tag):
     rows=[]
     for it in items.get("ItemsResult",{}).get("Items",[]):
@@ -146,6 +155,17 @@ def table_links_only(tag, keywords):
         return "<p>Añade palabras clave en la configuración para ver búsquedas útiles.</p>"
     return "<table><thead><tr><th>Búsqueda</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+"".join(rows)+"</tbody></table>"
 
+def write_page(slug, title, table, posts_meta, base):
+    intro="Comparativa generada automáticamente. Haz clic para ver precio actualizado en Amazon."
+    tips=["Define presupuesto y tamaño.","Revisa garantía y repuestos.","Evita extras que no usarás."]
+    faqs=[("¿Cambian los precios?","Sí, Amazon los actualiza."),
+          ("¿Afecta el afiliado al precio?","No."),
+          ("¿Cómo elegimos?","Disponibilidad, reputación y especificaciones.")]
+    head = Template(BASE_HEAD).render(title_tag=title, meta_description=f"Guía rápida: {title}.", base=base)
+    related=[(s,t) for s,t,_ in posts_meta[:3]]
+    html = POST_TMPL.render(head=head, h1=title, intro=intro, table=table, tips=tips, faqs=faqs, related=related, tail=TAIL, base=base)
+    write(f"{slug}/index.html", html)
+
 # ---------- Main ----------
 def main():
     tag = (cfg.get("amazon_partner_tag") or "").strip()
@@ -160,13 +180,6 @@ def main():
     posts_meta=[]
     for cat in cats:
         slug=cat["slug"]; title=cat["title"]; kws=cat.get("keywords",[])
-        h1=title
-        intro="Comparativa generada automáticamente. Haz clic para ver precio actualizado en Amazon."
-        tips=["Define presupuesto y tamaño.","Revisa garantía y repuestos.","Evita extras que no usarás."]
-        faqs=[("¿Cambian los precios?","Sí, Amazon los actualiza."),
-              ("¿Afecta el afiliado al precio?","No."),
-              ("¿Cómo elegimos?","Disponibilidad, reputación y especificaciones.")]
-
         if access and secret:
             items={"ItemsResult":{"Items":[]}}
             try:
@@ -179,14 +192,12 @@ def main():
         else:
             table = table_links_only(tag, kws if kws else [title])
 
-        related=[(s,t) for s,t,_ in posts_meta[:3]]
-        head=Template(HEAD).render(title_tag=title, meta_description=f"Guía rápida: {title}.")
-        html=POST_TMPL.render(head=head, h1=h1, intro=intro, table=table, tips=tips, faqs=faqs, related=related, tail=TAIL)
-        write(f"{slug}/index.html", html)
+        write_page(slug, title, table, posts_meta, base="../")  # CSS y enlaces relativos desde subpágina
         posts_meta.append((slug,title,"Selección automática y enlaces directos a Amazon."))
 
-    head=Template(HEAD).render(title_tag=site_title, meta_description="Listas y comparativas automatizadas, sin intervención.")
-    index=INDEX_TMPL.render(head=head, posts=posts_meta, site_title=site_title, tail=TAIL)
+    # home (base = "./")
+    head = Template(BASE_HEAD).render(title_tag=site_title, meta_description="Listas y comparativas automatizadas, sin intervención.", base="./")
+    index = INDEX_TMPL.render(head=head, posts=posts_meta, site_title=site_title, tail=TAIL, base="./")
     write("index.html", index)
 
 if __name__ == "__main__":
