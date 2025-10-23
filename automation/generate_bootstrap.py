@@ -1,7 +1,7 @@
 # automation/generate_bootstrap.py
-# Genera un sitio estatico en /public leyendo configuracion de automation/bootstrap.json
-# - Si el JSON trae amazon_access_key/secret -> intenta PA-API SearchItems (cabeceras firmadas)
-# - Si no, publica sin precios ni bullets (solo botones "Ver precio" con tu tag)
+# Genera un sitio estático en /public leyendo automation/bootstrap.json
+# Funciona SIN claves PA-API (publica con enlaces de búsqueda).
+# Si añades amazon_access_key/secret en el BOOTSTRAP_JSON, intentará PA-API SearchItems.
 
 import os, json, re, datetime, hashlib, hmac, requests
 from jinja2 import Template
@@ -54,7 +54,50 @@ def load_posts_list():
                 idx.append((slug, t.group(1) if t else slug, (d.group(1)[:160]+"...") if d else ""))
     return sorted(idx)[:200]
 
-# --------- PA-API helpers (solo si hay claves) ----------
+# ---------- Carga robusta de config ----------
+def _default_cfg():
+    return {
+        "amazon_partner_tag": "tu-tag-21",
+        "amazon_access_key": "",
+        "amazon_secret_key": "",
+        "site_title": "AutoNicho",
+        "categories": [
+            {
+                "slug":"hidrolimpiadoras",
+                "title":"Mejores hidrolimpiadoras 2025",
+                "keywords":["hidrolimpiadora 140 bar","karcher k4","hidrolimpiadora domestica"]
+            }
+        ]
+    }
+
+def _clean_json(raw: str) -> str:
+    s = raw.strip()
+    # elimina fences de markdown ```json ... ```
+    if s.startswith("```"):
+        s = s.lstrip("`")
+        nl = s.find("\n")
+        if nl != -1:
+            s = s[nl+1:]
+        if s.endswith("```"):
+            s = s[:-3]
+    # comillas “ ” y ‘ ’ -> "
+    s = s.replace("“","\"").replace("”","\"").replace("‘","\"").replace("’","\"")
+    # si todo va con comilla simple, cámbialas a dobles (best-effort)
+    if s.count('"') == 0 and "'" in s:
+        s = s.replace("'", "\"")
+    return s
+
+try:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        raw = f.read()
+    try:
+        cfg = json.loads(raw)
+    except Exception:
+        cfg = json.loads(_clean_json(raw))
+except Exception:
+    cfg = _default_cfg()
+
+# ---------- PA-API helpers (solo si hay claves) ----------
 AWS_REGION="eu-west-1"; HOST="webservices.amazon.es"; SERVICE="ProductAdvertisingAPI"
 def _sign(key,msg): return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 def _sig_key(key,dateStamp,regionName,serviceName):
@@ -87,8 +130,7 @@ def paapi_search_items(tag, kw, access, secret, count=10):
     target="com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems"
     return _pa_call("/paapi5/searchitems", payload, target, access, secret)
 
-# --------------------------------------------------------
-
+# ---------- Generación de tablas ----------
 def table_from_items(items, tag):
     rows=[]
     for it in items.get("ItemsResult",{}).get("Items",[]):
@@ -105,94 +147,55 @@ def table_from_items(items, tag):
     return "<table><thead><tr><th>Modelo</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+"".join(rows)+"</tbody></table>"
 
 def table_links_only(tag, keywords):
-    # Fallback sin PA-API: 6 enlaces directos a búsquedas en Amazon (compliant y evergreen)
     rows=[]
-    for kw in keywords[:6]:
+    for kw in (keywords[:6] if keywords else []):
         link=f"https://www.amazon.es/s?k={requests.utils.quote(kw)}&tag={tag}"
         rows.append(f"<tr><td><strong>{kw.title()}</strong></td><td>-</td><td>-</td><td><a class='bb-btn' rel='sponsored nofollow' target='_blank' href='{link}'>Ver opciones</a></td></tr>")
+    if not rows:
+        return "<p>Añade palabras clave en la configuración para ver búsquedas útiles.</p>"
     return "<table><thead><tr><th>Búsqueda</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+"".join(rows)+"</tbody></table>"
 
+# ---------- Main ----------
 def main():
-    def _default_cfg():
-    return {
-        "amazon_partner_tag": "tu-tag-21",
-        "amazon_access_key": "",
-        "amazon_secret_key": "",
-        "site_title": "AutoNicho",
-        "categories": [
-            {
-                "slug":"hidrolimpiadoras",
-                "title":"Mejores hidrolimpiadoras 2025",
-                "keywords":["hidrolimpiadora 140 bar","karcher k4","hidrolimpiadora domestica"]
-            }
-        ]
-    }
-
-def _clean_json(raw: str) -> str:
-    s = raw.strip()
-    # elimina fences de markdown ```json ... ```
-    if s.startswith("```"):
-        s = s.lstrip("`")
-        nl = s.find("\n")
-        if nl != -1:
-            s = s[nl+1:]
-        if s.endswith("```"):
-            s = s[:-3]
-    # comillas “ ” y ‘ ’ -> "
-    s = s.replace("“","\"").replace("”","\"").replace("‘","\"").replace("’","\"")
-    # comillas simples -> dobles (aproximado; basta para claves/valores simples)
-    if s.count('"') == 0 and "'" in s:
-        s = s.replace("'", "\"")
-    return s
-
-try:
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        raw = f.read()
-    try:
-        cfg = json.loads(raw)
-    except Exception:
-        cfg = json.loads(_clean_json(raw))
-except Exception:
-    cfg = _default_cfg()
-
-    tag=cfg.get("amazon_partner_tag","").strip()
-    access=cfg.get("amazon_access_key","").strip()
-    secret=cfg.get("amazon_secret_key","").strip()
-    site_title=cfg.get("site_title","AutoNicho")
-    cats=cfg.get("categories",[])[:3]
+    tag = (cfg.get("amazon_partner_tag") or "").strip()
+    access = (cfg.get("amazon_access_key") or "").strip()
+    secret = (cfg.get("amazon_secret_key") or "").strip()
+    site_title = cfg.get("site_title","AutoNicho")
+    cats = cfg.get("categories",[])[:3]
 
     # estilo
     write("static/style.css", STYLE)
 
     posts_meta=[]
-
     for cat in cats:
         slug=cat["slug"]; title=cat["title"]; kws=cat.get("keywords",[])
-        h1=title; intro="Comparativa generada automáticamente. Haz clic para ver precio actualizado en Amazon."
+        h1=title
+        intro="Comparativa generada automáticamente. Haz clic para ver precio actualizado en Amazon."
         tips=["Define presupuesto y tamaño.","Revisa garantía y repuestos.","Evita extras que no usarás."]
-        faqs=[("¿Cambian los precios?","Sí, Amazon los actualiza."),("¿Afecta el afiliado al precio?","No."),("¿Cómo elegimos?","Disponibilidad, reputación y especificaciones.")]
-        # tabla
+        faqs=[("¿Cambian los precios?","Sí, Amazon los actualiza."),
+              ("¿Afecta el afiliado al precio?","No."),
+              ("¿Cómo elegimos?","Disponibilidad, reputación y especificaciones.")]
+
+        # tabla según haya PA-API o no
         if access and secret:
             items={"ItemsResult":{"Items":[]}}
             try:
                 for kw in kws[:2]:
-                    res=paapi_search_items(tag, kw, access, secret, count=6)
+                    res = paapi_search_items(tag, kw, access, secret, count=6)
                     items["ItemsResult"]["Items"] += res.get("ItemsResult",{}).get("Items",[])
             except Exception:
                 pass
-            table=table_from_items(items, tag)
+            table = table_from_items(items, tag)
         else:
-            table=table_links_only(tag, kws if kws else [title])
+            table = table_links_only(tag, kws if kws else [title])
 
-        # related
         related=[(s,t) for s,t,_ in posts_meta[:3]]
-        head=Template(HEAD).render(title_tag=title, meta_description=f"Guía rápida: {title}.", )
+        head=Template(HEAD).render(title_tag=title, meta_description=f"Guía rápida: {title}.")
         html=POST_TMPL.render(head=head, h1=h1, intro=intro, table=table, tips=tips, faqs=faqs, related=related, tail=TAIL)
         write(f"{slug}/index.html", html)
         posts_meta.append((slug,title,"Selección automática y enlaces directos a Amazon."))
 
-    # index
-    head=Template(HEAD).render(title_tag=site_title, meta_description="Listas y comparativas automatizadas, sin intervención.",)
+    head=Template(HEAD).render(title_tag=site_title, meta_description="Listas y comparativas automatizadas, sin intervención.")
     index=INDEX_TMPL.render(head=head, posts=posts_meta, site_title=site_title, tail=TAIL)
     write("index.html", index)
 
