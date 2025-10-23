@@ -39,9 +39,8 @@ jobs:
           python - <<'PY'
           import os, pathlib
           raw = os.environ.get('RAW','')
-          p = pathlib.Path('automation/bootstrap.json')
-          p.write_text(raw, encoding='utf-8')
-          print('Wrote', p, 'len=', len(raw))
+          pathlib.Path('automation/bootstrap.json').write_text(raw, encoding='utf-8')
+          print('BOOTSTRAP_JSON bytes:', len(raw))
           PY
 
       - name: Generate site (AutoDiscover)
