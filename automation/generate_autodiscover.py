@@ -1,6 +1,8 @@
-# automation/generate_autodiscover.py
-# Sitio 100 % autónomo (programmatic SEO) con diseño moderno + EEAT + schema + sitemap.
-# Usa Amazon PA-API (si hay claves) para Fotos+Precios; si falla, fallback bonito (Unsplash + CTAs).
+# ===== PRO MAGAZINE GENERATOR (autónomo + diseño moderno + EEAT) =====
+# - Publica home/categorías/posts con hero, cards y tabla de productos.
+# - Si PA-API responde: imágenes+precios reales. Si no: imágenes temáticas (Unsplash) + CTAs.
+# - SEO técnico completo: schema Article/Product/FAQ/Breadcrumb, OG/Twitter, sitemap, robots.
+# - Rutas CSS correctas para GitHub Pages (subcarpetas).
 import os, re, json, time, hashlib, hmac, datetime, random
 from urllib.parse import quote, urlparse
 import requests
@@ -63,10 +65,51 @@ def load_cfg():
 
 CFG = load_cfg()
 BASE_URL = CFG.get("base_url") or DEFAULT_BASE_URL
-BASE_PATH = urlparse(BASE_URL).path or "/"  # ej. "/usuario/repositorio/"
+BASE_PATH = (urlparse(BASE_URL).path or "/")
 if not BASE_PATH.endswith("/"): BASE_PATH += "/"
 
-# ====== TEMPLATES & STYLE ======
+# ==================== ESTILOS (skin revista) ====================
+STYLE = """
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Manrope:wght@600;700&display=swap');
+:root{
+  --bg:#0f0f10; --card:#161616; --fg:#e6e6e6; --muted:#9aa0a6;
+  --br:#242424; --accent:#ff6a00; --accent-2:#ff9152;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.65 Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:16px}
+header{position:sticky;top:0;z-index:50;background:rgba(15,15,16,.85);backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--br)}
+.logo{font:700 20px Manrope,Inter;text-decoration:none;color:#fff}
+nav{display:flex;gap:18px}
+nav a{color:var(--fg);text-decoration:none;opacity:.9}
+nav a:hover{color:#fff;opacity:1}
+.hero{padding:28px 0;border-bottom:1px solid var(--br)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin:22px 0}
+.card{background:var(--card);border:1px solid var(--br);border-radius:16px;display:block;color:inherit;text-decoration:none;overflow:hidden;transition:transform .08s ease, box-shadow .08s ease}
+.card:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)}
+.card .img{aspect-ratio:16/9;background:#222;display:block;width:100%}
+.card .badge{display:inline-block;background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#111;padding:4px 10px;border-radius:999px;font-weight:700;font-size:12px;letter-spacing:.2px}
+.card-body{padding:14px}
+h1,h2{font-family:Manrope,Inter}
+h1{font-size:34px;margin:8px 0 6px}
+h2{font-size:22px;margin:0 0 6px}
+.muted{color:var(--muted)}
+.table{width:100%;border-collapse:collapse;margin:18px 0;background:var(--card);border-radius:14px;overflow:hidden}
+.table th,.table td{border-bottom:1px solid var(--br);padding:12px 14px;vertical-align:top}
+.table thead th{background:#1c1c1c;text-align:left}
+.bb-btn{display:inline-block;padding:8px 12px;border:1px solid var(--accent);border-radius:10px;text-decoration:none;color:#fff}
+.bb-btn:hover{background:var(--accent)}
+.bb-price{font-weight:700;color:#fff}
+.pimg img{width:100%;height:auto;border:1px solid var(--br);border-radius:12px}
+footer{margin-top:36px;border-top:1px solid var(--br);background:#0f0f10}
+footer .wrap{color:var(--muted)}
+.tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.tag{background:#1f1f1f;border:1px solid var(--br);padding:5px 10px;border-radius:999px;color:#cbd5e1;font-size:12px;text-decoration:none}
+.page h1{margin-bottom:8px}
+.posts{list-style:none;padding:0;margin:0}
+.posts li{margin:6px 0}
+"""
+
 BASE_HEAD = """<!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ title_tag }}</title>
@@ -76,8 +119,8 @@ BASE_HEAD = """<!doctype html><html lang="es"><head>
 <meta name="twitter:card" content="summary_large_image">
 <link rel="stylesheet" href="{{ root }}static/style.css">
 </head><body>
-<header><div class="wrap">
-  <a class="logo" href="{{ root }}">🚐 {{ site_title }}</a>
+<header><div class="wrap" style="display:flex;justify-content:space-between;align-items:center;gap:16px;">
+  <a class="logo" href="{{ root }}">TG · {{ site_title }}</a>
   <nav><a href="{{ root }}sobre/">Sobre</a><a href="{{ root }}contacto/">Contacto</a><a href="{{ root }}legal/">Legal</a></nav>
 </div></header>
 <main class="wrap">"""
@@ -88,12 +131,20 @@ TAIL = """</main>
 INDEX_TMPL = Template("""{{ head }}
 <section class="hero">
   <h1>{{ site_title }}</h1>
-  <p>Guías y comparativas de accesorios para furgonetas camper. Precios al día si la API está activa.</p>
+  <p class="muted">Guías y comparativas de accesorios para furgonetas camper. Publicación diaria automática.</p>
+  <div class="tags">
+    {% for cat in cats %}<a class="tag" href="{{ root }}{{ cat.slug }}/">{{ cat.title }}</a>{% endfor %}
+  </div>
 </section>
 <section class="grid">
 {% for cat in cats %}
 <a class="card" href="{{ root }}{{ cat.slug }}/">
-  <div class="card-body"><h2>{{ cat.title }}</h2><p>{{ cat.desc }}</p></div>
+  <img class="img" src="https://source.unsplash.com/800x450/?camper,{{ cat.slug }}" alt="{{ cat.title }}">
+  <div class="card-body">
+    <span class="badge">Categoría</span>
+    <h2>{{ cat.title }}</h2>
+    <p class="muted">{{ cat.desc }}</p>
+  </div>
 </a>
 {% endfor %}
 </section>
@@ -103,7 +154,7 @@ INDEX_TMPL = Template("""{{ head }}
 {{ tail }}""")
 
 CAT_TMPL = Template("""{{ head }}
-<h1>{{ h1 }}</h1><p>{{ intro }}</p>
+<h1>{{ h1 }}</h1><p class="muted">{{ intro }}</p>
 <table class="table"><thead><tr><th>Producto</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>{{ rows|safe }}</tbody></table>
 {{ tail }}""")
 
@@ -122,21 +173,6 @@ POST_TMPL = Template("""{{ head }}
 
 PAGE_TMPL = Template("""{{ head }}<article class="page"><h1>{{ h1 }}</h1>{{ body|safe }}</article>{{ tail }}""")
 
-STYLE = """
-:root{--bg:#fff;--fg:#0f172a;--muted:#667085;--card:#f6f7f9;--pri:#111827;--br:#e5e7eb}
-*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;color:var(--fg);background:var(--bg);line-height:1.65}
-.wrap{max-width:1120px;margin:0 auto;padding:16px}
-header{background:#fafafa;border-bottom:1px solid var(--br)}.logo{font-weight:700;text-decoration:none;color:var(--pri)}
-nav{display:flex;gap:16px}.hero{padding:24px 0;border-bottom:1px solid var(--br)}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:18px 0}
-.card{background:var(--card);border:1px solid var(--br);border-radius:14px;text-decoration:none;color:inherit;display:block;transition:transform .06s ease}
-.card:hover{transform:translateY(-2px)}.card-body{padding:16px}.card h2{margin:6px 0}.muted{color:var(--muted)}
-.table{width:100%;border-collapse:collapse;margin:16px 0}.table th,.table td{border:1px solid var(--br);padding:10px;vertical-align:top}
-.bb-btn{display:inline-block;padding:8px 12px;border:1px solid var(--pri);border-radius:10px;text-decoration:none}
-.bb-price{font-weight:700}.pimg img{max-width:100%;height:auto;border:1px solid var(--br);border-radius:12px}
-footer{margin-top:32px;border-top:1px solid var(--br);background:#fafafa}
-"""
-
 def head_meta(title, desc, canonical, root, site_title):
     return Template(BASE_HEAD).render(title_tag=title, meta_description=desc, canonical=canonical,
                                       root=root, site_title=site_title)
@@ -144,7 +180,7 @@ def head_meta(title, desc, canonical, root, site_title):
 def tail_meta(disclosure, site_title):
     return Template(TAIL).render(disclosure=disclosure, year=datetime.datetime.utcnow().year, site_title=site_title)
 
-# ====== Amazon PA-API ======
+# ==================== AMAZON PA-API (opcional) ====================
 AWS_REGION="eu-west-1"; HOST="webservices.amazon.es"; SERVICE="ProductAdvertisingAPI"
 def _sign(key,msg): return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 def _sig_key(key,dateStamp,regionName,serviceName):
@@ -179,7 +215,7 @@ def pa_search(tag, kw, access, secret, count=10):
     target="com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems"
     return _pa_call("/paapi5/searchitems", payload, target, access, secret)
 
-# ====== Tablas / Fallback ======
+# ==================== TABLAS / FALLBACK ====================
 def product_table(items, tag):
     rows=[]
     for it in items:
@@ -191,7 +227,7 @@ def product_table(items, tag):
         avail=it.get("Offers",{}).get("Listings",[{}])[0].get("Availability",{}).get("Message","")
         img=it.get("Images",{}).get("Primary",{}).get("Medium",{}).get("URL","")
         link=f"https://www.amazon.es/dp/{asin}?tag={tag}"
-        img_html=(f'<img src="{img}" alt="{title}" width="64" height="64" loading="lazy" style="border-radius:8px;border:1px solid #e5e7eb">' if img else "")
+        img_html=(f'<img src="{img}" alt="{title}" width="64" height="64" loading="lazy" style="border-radius:8px;border:1px solid #2a2a2a">' if img else "")
         card="<div style='display:flex;gap:10px;align-items:flex-start'>"+img_html+f"<div><strong>{title}</strong>{bullets}</div></div>"
         rows.append(f"<tr><td>{card}</td><td><span class='bb-price'>{price}</span></td><td>{avail}</td><td><a class='bb-btn' rel='sponsored nofollow' target='_blank' href='{link}'>Comprar</a></td></tr>")
     if not rows: return "<tr><td colspan='4'>Sin resultados hoy. Vuelve más tarde.</td></tr>"
@@ -205,9 +241,8 @@ def links_table(tag, keywords):
     if not rows: return "<tr><td colspan='4'>Sin datos.</td></tr>"
     return "\n".join(rows)
 
-def unsplash_fallback(term):
-    q = quote(f"camper van,{term}")
-    return f"https://source.unsplash.com/800x520/?{q}"
+def unsplash(term):
+    return f"https://source.unsplash.com/1000x600/?{quote('camper van,'+term)}"
 
 def product_ld(name, url, img, price):
     data={"@context":"https://schema.org","@type":"Product","name":name}
@@ -217,7 +252,7 @@ def product_ld(name, url, img, price):
         data["offers"]={"@type":"Offer","price":re.sub(r"[^0-9,\.]","",price).replace(",","."),"priceCurrency":"EUR","availability":"https://schema.org/InStock"}
     return json.dumps(data, ensure_ascii=False)
 
-# ====== Escritura de páginas (usa BASE_PATH como raíz absoluta del sitio) ======
+# ==================== PÁGINAS ====================
 def list_slugs():
     out=[]
     for root,_,files in os.walk("public"):
@@ -270,11 +305,11 @@ def build_category(cfg, cat):
             except Exception as e:
                 write("_logs/paapi_last_error.txt", f"{datetime.datetime.utcnow()}: {e}")
     # dedup
-    seen=set(); items2=[]
+    seen=set(); uniq=[]
     for it in items:
         a=it.get("ASIN")
-        if a and a not in seen: items2.append(it); seen.add(a)
-    items=items2[:12]
+        if a and a not in seen: uniq.append(it); seen.add(a)
+    items=uniq[:12]
     rows = product_table(items, tag) if items else links_table(tag, cat.get("keywords",[]))
     h1=cat["title"]; intro="Selección automática con datos de Amazon (si API activa)."
     head=head_meta(h1, f"Comparativa de {h1}", BASE_URL+cat["slug"]+"/" if BASE_URL else "", BASE_PATH, CFG["site_title"])
@@ -299,8 +334,8 @@ def write_post_from_keyword(cfg, cat_slug, kw):
         except Exception as e:
             write("_logs/paapi_last_error.txt", f"{datetime.datetime.utcnow()}: {e}")
     if not image:
-        image = unsplash_fallback(kw)
-        table="<table class='table'><thead><tr><th>Búsqueda</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+links_table(tag,[kw,kw+" oferta",kw+" barato"])+"</tbody></table>"
+        image = unsplash(kw)
+        table="<table class='table'><thead><tr><th>Búsqueda</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+links_table(tag,[kw,kw+' oferta',kw+' barato'])+"</tbody></table>"
     tips=["Define presupuesto y tamaño.","Revisa garantía y repuestos.","Evita extras que no usarás."]
     faqs=[("¿Cambian los precios?","Sí, Amazon los actualiza."),("¿Afecta el afiliado al precio?","No."),("¿Cómo elegimos?","Disponibilidad, reputación y especificaciones.")]
     head=head_meta(h1, f"Guía: {h1}", BASE_URL+slug+"/" if BASE_URL else "", BASE_PATH, CFG["site_title"])
@@ -339,9 +374,6 @@ def run_autodiscover(cfg):
     write_home(cfg, recent)
     write_sitemap_and_robots(BASE_URL)
 
-def main():
+if __name__=="__main__":
     ensure_dirs()
     run_autodiscover(CFG)
-
-if __name__=="__main__":
-    main()
