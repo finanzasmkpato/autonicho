@@ -206,19 +206,40 @@ def tail_meta(disclosure, site_title):
     return Template(TAIL).render(disclosure=disclosure, year=datetime.datetime.utcnow().year, site_title=site_title)
 
 def product_table(items, tag):
-    rows=[]
+    rows = []
     for it in items:
-        asin = it.get("ASIN","")
-        title = (it.get("ItemInfo",{}).get("Title",{}).get("DisplayValue") or asin).strip()
-        feats = it.get("ItemInfo",{}).get("Features",{}).get("DisplayValues") or []
-        bullets = "<ul class='muted'>"+"".join([f"<li>{re.sub('<.*?>','',b)}</li>" for b in feats[:4]])+"</ul>" if feats else ""
-        price = it.get("Offers",{}).get("Listings",[{}])[0].get("Price",{}).get("DisplayAmount","Consultar")
-        avail = it.get("Offers",{}).get("Listings",[{}])[0].get("Availability",{}).get("Message","")
-        img = it.get("Images",{}).get("Primary",{}).get("Medium",{}).get("URL","")
+        asin = it.get("ASIN", "")
+        title = (it.get("ItemInfo", {}).get("Title", {}).get("DisplayValue") or asin).strip()
+        feats = it.get("ItemInfo", {}).get("Features", {}).get("DisplayValues") or []
+        bullets = "<ul class='muted'>" + "".join([f"<li>{re.sub('<.*?>','', b)}</li>" for b in feats[:4]]) + "</ul>" if feats else ""
+        price = it.get("Offers", {}).get("Listings", [{}])[0].get("Price", {}).get("DisplayAmount", "Consultar")
+        avail = it.get("Offers", {}).get("Listings", [{}])[0].get("Availability", {}).get("Message", "")
+        img = it.get("Images", {}).get("Primary", {}).get("Medium", {}).get("URL", "")
         link = f"https://www.amazon.es/dp/{asin}?tag={tag}"
-        title_html = f"<div style='display:flex;gap:10px;align-items:flex-start'>{f'<img src=\"{img}\" alt=\"{title}\" width=\"64\" height=\"64\" loading=\"lazy\" style=\"border-radius:8px;border:1px solid #e5e7eb\">' if img else ''}<div><strong>{title}</strong>{bullets}</div></div>"
-        rows.append(f"<tr><td>{title_html}</td><td><span class='bb-price'>{price}</span></td><td>{avail}</td><td><a class='bb-btn' rel='sponsored nofollow' target='_blank' href='{link}'>Comprar</a></td></tr>")
-    if not rows: return "<tr><td colspan='4'>Sin resultados hoy. Vuelve más tarde.</td></tr>"
+
+        # ✅ Evitamos f-string anidada: componemos el bloque de imagen por separado
+        img_html = (
+            f'<img src="{img}" alt="{title}" width="64" height="64" loading="lazy" '
+            f'style="border-radius:8px;border:1px solid #e5e7eb">'
+            if img else ""
+        )
+
+        title_block = (
+            "<div style='display:flex;gap:10px;align-items:flex-start'>"
+            f"{img_html}<div><strong>{title}</strong>{bullets}</div></div>"
+        )
+
+        rows.append(
+            "<tr>"
+            f"<td>{title_block}</td>"
+            f"<td><span class='bb-price'>{price}</span></td>"
+            f"<td>{avail}</td>"
+            f"<td><a class='bb-btn' rel='sponsored nofollow' target='_blank' href='{link}'>Comprar</a></td>"
+            "</tr>"
+        )
+
+    if not rows:
+        return "<tr><td colspan='4'>Sin resultados hoy. Vuelve más tarde.</td></tr>"
     return "\n".join(rows)
 
 def links_table(tag, keywords):
