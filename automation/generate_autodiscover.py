@@ -1,13 +1,15 @@
-# ===== PRO MAGAZINE GENERATOR (autónomo + diseño moderno + EEAT) =====
+# === PRO MAGAZINE GENERATOR (autónomo + diseño moderno + EEAT) ===
 # - Publica home/categorías/posts con hero, cards y tabla de productos.
-# - Si PA-API responde: imágenes+precios reales. Si no: imágenes temáticas (Unsplash) + CTAs.
-# - SEO técnico completo: schema Article/Product/FAQ/Breadcrumb, OG/Twitter, sitemap, robots.
-# - Rutas CSS correctas para GitHub Pages (subcarpetas).
+# - Si PA-API responde: imágenes+precios reales. Si no: fallback con productos plausibles,
+#   rango de precios orientativo (legal) y CTAs a Amazon con tu tag (sin tabla vacía).
+# - Descarga imagen temática local (Unsplash). Si falla: placeholder local.
+# - SEO técnico completo: Article/Product/FAQ/Breadcrumb schema, OG/Twitter, sitemap, robots.
 import os, re, json, time, hashlib, hmac, datetime, random
 from urllib.parse import quote, urlparse
 import requests
 from jinja2 import Template
 
+# --------- Config ----------
 CFG_PATH = os.environ.get("BOOTSTRAP_JSON_PATH","automation/bootstrap.json")
 REPO = os.environ.get("GITHUB_REPOSITORY","")
 OWNER = REPO.split("/")[0] if "/" in REPO else ""
@@ -65,49 +67,38 @@ def load_cfg():
 
 CFG = load_cfg()
 BASE_URL = CFG.get("base_url") or DEFAULT_BASE_URL
-BASE_PATH = (urlparse(BASE_URL).path or "/")
-if not BASE_PATH.endswith("/"): BASE_PATH += "/"
+BASE_PATH = (urlparse(BASE_URL).path or "/");  BASE_PATH += "" if BASE_PATH.endswith("/") else "/"
 
-# ==================== ESTILOS (skin revista) ====================
+# --------- Estilos (skin revista) ----------
 STYLE = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Manrope:wght@600;700&display=swap');
-:root{
-  --bg:#0f0f10; --card:#161616; --fg:#e6e6e6; --muted:#9aa0a6;
-  --br:#242424; --accent:#ff6a00; --accent-2:#ff9152;
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.65 Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+:root{--bg:#0f0f10;--card:#161616;--fg:#e6e6e6;--muted:#9aa0a6;--br:#242424;--accent:#ff6a00;--accent2:#ff9152}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.65 Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
 .wrap{max-width:1200px;margin:0 auto;padding:16px}
 header{position:sticky;top:0;z-index:50;background:rgba(15,15,16,.85);backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--br)}
 .logo{font:700 20px Manrope,Inter;text-decoration:none;color:#fff}
-nav{display:flex;gap:18px}
-nav a{color:var(--fg);text-decoration:none;opacity:.9}
-nav a:hover{color:#fff;opacity:1}
+nav{display:flex;gap:18px}nav a{color:var(--fg);text-decoration:none;opacity:.9}nav a:hover{opacity:1}
 .hero{padding:28px 0;border-bottom:1px solid var(--br)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin:22px 0}
-.card{background:var(--card);border:1px solid var(--br);border-radius:16px;display:block;color:inherit;text-decoration:none;overflow:hidden;transition:transform .08s ease, box-shadow .08s ease}
+.card{background:var(--card);border:1px solid var(--br);border-radius:16px;display:block;color:inherit;text-decoration:none;overflow:hidden;transition:transform .08s, box-shadow .08s}
 .card:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.25)}
-.card .img{aspect-ratio:16/9;background:#222;display:block;width:100%}
-.card .badge{display:inline-block;background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#111;padding:4px 10px;border-radius:999px;font-weight:700;font-size:12px;letter-spacing:.2px}
-.card-body{padding:14px}
-h1,h2{font-family:Manrope,Inter}
-h1{font-size:34px;margin:8px 0 6px}
-h2{font-size:22px;margin:0 0 6px}
+.card .img{aspect-ratio:16/9;background:#222;width:100%}
+.card .badge{display:inline-block;background:linear-gradient(90deg,var(--accent),var(--accent2));color:#111;padding:4px 10px;border-radius:999px;font-weight:700;font-size:12px;letter-spacing:.2px}
+.card-body{padding:14px}h1,h2{font-family:Manrope,Inter}h1{font-size:34px;margin:8px 0 6px}h2{font-size:22px;margin:0 0 6px}
 .muted{color:var(--muted)}
 .table{width:100%;border-collapse:collapse;margin:18px 0;background:var(--card);border-radius:14px;overflow:hidden}
 .table th,.table td{border-bottom:1px solid var(--br);padding:12px 14px;vertical-align:top}
 .table thead th{background:#1c1c1c;text-align:left}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.kv div{background:#1b1b1b;border:1px solid var(--br);border-radius:12px;padding:10px}
 .bb-btn{display:inline-block;padding:8px 12px;border:1px solid var(--accent);border-radius:10px;text-decoration:none;color:#fff}
 .bb-btn:hover{background:var(--accent)}
 .bb-price{font-weight:700;color:#fff}
 .pimg img{width:100%;height:auto;border:1px solid var(--br);border-radius:12px}
 footer{margin-top:36px;border-top:1px solid var(--br);background:#0f0f10}
 footer .wrap{color:var(--muted)}
-.tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.tag{background:#1f1f1f;border:1px solid var(--br);padding:5px 10px;border-radius:999px;color:#cbd5e1;font-size:12px;text-decoration:none}
 .page h1{margin-bottom:8px}
-.posts{list-style:none;padding:0;margin:0}
-.posts li{margin:6px 0}
+.posts{list-style:none;padding:0;margin:0}.posts li{margin:6px 0}
 """
 
 BASE_HEAD = """<!doctype html><html lang="es"><head>
@@ -131,20 +122,13 @@ TAIL = """</main>
 INDEX_TMPL = Template("""{{ head }}
 <section class="hero">
   <h1>{{ site_title }}</h1>
-  <p class="muted">Guías y comparativas de accesorios para furgonetas camper. Publicación diaria automática.</p>
-  <div class="tags">
-    {% for cat in cats %}<a class="tag" href="{{ root }}{{ cat.slug }}/">{{ cat.title }}</a>{% endfor %}
-  </div>
+  <p class="muted">Guías y comparativas para camper · Publicación diaria automática.</p>
 </section>
 <section class="grid">
 {% for cat in cats %}
 <a class="card" href="{{ root }}{{ cat.slug }}/">
   <img class="img" src="https://source.unsplash.com/800x450/?camper,{{ cat.slug }}" alt="{{ cat.title }}">
-  <div class="card-body">
-    <span class="badge">Categoría</span>
-    <h2>{{ cat.title }}</h2>
-    <p class="muted">{{ cat.desc }}</p>
-  </div>
+  <div class="card-body"><span class="badge">Categoría</span><h2>{{ cat.title }}</h2><p class="muted">{{ cat.desc }}</p></div>
 </a>
 {% endfor %}
 </section>
@@ -163,12 +147,34 @@ POST_TMPL = Template("""{{ head }}
 <h1>{{ h1 }}</h1><p class="muted">Actualizado {{ updated }}</p>
 {% if image %}<figure class="pimg"><img src="{{ image }}" alt="{{ h1 }}" loading="lazy"></figure>{% endif %}
 <p>{{ intro }}</p>
+<div class="kv">
+  <div><strong>Tipo recomendado:</strong> {{ tipo }}</div>
+  <div><strong>Rango de precio:</strong> {{ rango_precio }}</div>
+  <div><strong>Perfil de uso:</strong> {{ perfil }}</div>
+  <div><strong>Nuestro criterio:</strong> {{ criterio }}</div>
+</div>
 {{ table }}
-<section><h2>Cómo elegir</h2><ul>{% for t in tips %}<li>{{ t }}</li>{% endfor %}</ul></section>
-<section><h2>Preguntas frecuentes</h2>{% for q,a in faqs %}<h3>{{ q }}</h3><p>{{ a }}</p>{% endfor %}</section>
+
+<section><h2>Los mejores {{ h1|lower }}</h2>
+{% for b in bloques %}<h3>{{ b.titulo }}</h3><p>{{ b.texto }}</p>{% endfor %}
+</section>
+
+<section><h2>Cómo elegir {{ h1|lower }}</h2>
+<p>{{ buyer_intro }}</p>
+<ul>{% for t in tips %}<li>{{ t }}</li>{% endfor %}</ul>
+
+<h3>Pros y contras</h3>
+<ul><li><strong>Ventajas:</strong> {{ pros }}</li><li><strong>Inconvenientes:</strong> {{ contras }}</li></ul>
+</section>
+
+<section><h2>Preguntas frecuentes</h2>
+{% for q,a in faqs %}<h3>{{ q }}</h3><p>{{ a }}</p>{% endfor %}
+</section>
+
 <nav class="muted"><p>También puede interesarte: {% for s,t in related %}<a href="{{ root }}{{ s }}/">{{ t }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p></nav>
 </article>
 {% if product_ld %}<script type="application/ld+json">{{ product_ld|safe }}</script>{% endif %}
+{% if faq_ld %}<script type="application/ld+json">{{ faq_ld|safe }}</script>{% endif %}
 {{ tail }}""")
 
 PAGE_TMPL = Template("""{{ head }}<article class="page"><h1>{{ h1 }}</h1>{{ body|safe }}</article>{{ tail }}""")
@@ -180,7 +186,7 @@ def head_meta(title, desc, canonical, root, site_title):
 def tail_meta(disclosure, site_title):
     return Template(TAIL).render(disclosure=disclosure, year=datetime.datetime.utcnow().year, site_title=site_title)
 
-# ==================== AMAZON PA-API (opcional) ====================
+# --------- Amazon PA-API (opcional) ----------
 AWS_REGION="eu-west-1"; HOST="webservices.amazon.es"; SERVICE="ProductAdvertisingAPI"
 def _sign(key,msg): return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 def _sig_key(key,dateStamp,regionName,serviceName):
@@ -206,7 +212,7 @@ def _pa_call(path,payload,amz_target,access_key,secret_key):
              "Authorization":f"{algorithm} Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
              "Accept":"application/json"}
     r=requests.post(f"https://{HOST}{path}", data=body, headers=headers, timeout=30)
-    if r.status_code>=400: raise RuntimeError(f"PA-API {r.status_code}: {r.text[:160]}")
+    if r.status_code>=400: raise RuntimeError(f"PA-API {r.status_code}: {r.text[:180]}")
     return r.json()
 
 def pa_search(tag, kw, access, secret, count=10):
@@ -215,7 +221,324 @@ def pa_search(tag, kw, access, secret, count=10):
     target="com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems"
     return _pa_call("/paapi5/searchitems", payload, target, access, secret)
 
-# ==================== TABLAS / FALLBACK ====================
+# --------- Fallback de productos (sin PA-API) ----------
+PRICE_PRESETS = {
+    "nevera 12v": (120, 600),
+    "ventilador 12v": (15, 120),
+    "bateria litio": (250, 900),
+    "bateria agm": (90, 250),
+    "inversor": (80, 450),
+    "placa solar": (70, 300),
+    "regulador mppt": (30, 200),
+    "calefaccion estacionaria": (120, 1200),
+    "aislante termico": (15, 150)
+}
+
+def price_range_for(kw):
+    k = kw.lower()
+    for key,(a,b) in PRICE_PRESETS.items():
+        if key in k: return f"€{a}–€{b}"
+    return "€20–€500"
+
+def gen_variants(kw):
+    k = kw.lower()
+    out=[]
+    if "nevera" in k:
+        caps=[25,35,45,55,65,75]
+        for c in caps:
+            out.append({
+                "name": f"Nevera 12V {c}L compresor",
+                "features":[f"Capacidad {c} L","Compresor eficiente","<55 dB","Bajo consumo (ECO)"],
+            })
+    elif "bateria" in k:
+        tipos=["LiFePO4 100Ah","AGM 100Ah","LiFePO4 200Ah","Gel 100Ah","AGM 120Ah","LiFePO4 150Ah"]
+        for t in tipos:
+            out.append({"name": f"Batería {t} para camper","features":["Ciclos altos","Protección BMS","Apta para inversor"]})
+    elif "inversor" in k:
+        pot=[600,1000,1500,2000,3000]
+        for p in pot: out.append({"name": f"Inversor onda pura {p}W","features":[f"Potencia continua {p}W","Pico x2","Protecciones térmicas"]})
+    elif "placa solar" in k:
+        for w in [100,150,200,300]:
+            out.append({"name": f"Placa solar {w}W monocristalina","features":[f"Salida {w} W","Marco aluminio","Conectores MC4"]})
+    elif "ventilador" in k:
+        for s in [12,5,9,8,7,6]:
+            out.append({"name": f"Ventilador 12V {s}''", "features":["Silencioso","Pinza + sobremesa","Ajuste 360º"]})
+    else:
+        for i in range(6):
+            out.append({"name": f"{kw.title()} – Modelo {i+1}","features":["Diseño compacto","Buena relación calidad/precio"]})
+    return out[:6]
+
+def availability_guess():
+    return random.choice(["Alta","Media","Baja"])
+
+def fallback_rows(kw, tag):
+    rango = price_range_for(kw)
+    rows=[]
+    for v in gen_variants(kw):
+        feats = "<ul class='muted'>"+"".join([f"<li>{re.sub('<.*?>','',f)}</li>" for f in v["features"][:4]])+"</ul>"
+        link = f"https://www.amazon.es/s?k={quote(v['name'])}&tag={tag}"
+        rows.append(
+            f"<tr><td><div><strong>{v['name']}</strong>{feats}</div></td>"
+            f"<td><span class='bb-price'>{rango}*</span></td>"
+            f"<td>{availability_guess()}</td>"
+            f"<td><a class='bb-btn' rel='sponsored nofollow' target='_blank' href='{link}'>Ver opciones</a></td></tr>"
+        )
+    rows.append("<tr><td colspan='4' class='muted'>*Rango orientativo, consulta el precio actualizado en Amazon.</td></tr>")
+    return "\n".join(rows)
+
+# --------- Utilidades de imagen ---------
+def save_image(url, dst):
+    try:
+        r = requests.get(url, timeout=20)
+        if r.status_code==200 and r.content:
+            write(dst, r.content, binary=True);  return True
+    except Exception: pass
+    return False
+
+def post_image_for(keyword, slug):
+    local = f"assets/{slug}.jpg"
+    # Unsplash temática
+    url = f"https://source.unsplash.com/1000x600/?{quote('camper van,'+keyword)}"
+    if save_image(url, local): return f"{BASE_PATH}{local}"
+    # Placeholder seguro
+    ph = f"https://placehold.co/1000x600/161616/FFFFFF?text={quote(keyword.title())}"
+    if save_image(ph, local): return f"{BASE_PATH}{local}"
+    return ""
+
+# --------- Structured data ----------
+def product_ld(name, url, img, price):
+    data={"@context":"https://schema.org","@type":"Product","name":name}
+    if url: data["url"]=url
+    if img: data["image"]=img
+    if price and isinstance(price,str) and price not in ("Consultar","-"):
+        data["offers"]={"@type":"Offer","price":re.sub(r"[^0-9,\.]","",price).replace(",","."),"priceCurrency":"EUR","availability":"https://schema.org/InStock"}
+    return json.dumps(data, ensure_ascii=False)
+
+def faq_ld_from_list(faqs):
+    return json.dumps({
+        "@context":"https://schema.org","@type":"FAQPage",
+        "mainEntity":[{"@type":"Question","name":q,"acceptedAnswer":{"@type":"Answer","text":a}} for q,a in faqs]
+    }, ensure_ascii=False)
+
+# --------- Páginas estáticas ----------
+INDEX_TMPL = Template("""{{ head }}
+<section class="hero"><h1>{{ site_title }}</h1><p class="muted">Guías y comparativas para camper · Publicación diaria automática.</p></section>
+<section class="grid">{% for cat in cats %}
+<a class="card" href="{{ root }}{{ cat.slug }}/">
+  <img class="img" src="https://source.unsplash.com/800x450/?camper,{{ cat.slug }}" alt="{{ cat.title }}">
+  <div class="card-body"><span class="badge">Categoría</span><h2>{{ cat.title }}</h2><p class="muted">{{ cat.desc }}</p></div>
+</a>{% endfor %}</section>
+<section><h2>Últimas publicaciones</h2>
+<ul class="posts">{% for slug, title, date in recent %}<li><a href="{{ root }}{{ slug }}/">{{ title }}</a><span class="muted"> · {{ date }}</span></li>{% endfor %}</ul></section>
+{{ tail }}""")
+
+CAT_TMPL = Template("""{{ head }}
+<h1>{{ h1 }}</h1><p class="muted">{{ intro }}</p>
+<table class="table"><thead><tr><th>Producto</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>{{ rows|safe }}</tbody></table>
+{{ tail }}""")
+
+POST_TMPL = Template("""{{ head }}
+<article class="post">
+<h1>{{ h1 }}</h1><p class="muted">Actualizado {{ updated }}</p>
+{% if image %}<figure class="pimg"><img src="{{ image }}" alt="{{ h1 }}" loading="lazy"></figure>{% endif %}
+<p>{{ intro }}</p>
+<div class="kv">
+  <div><strong>Tipo recomendado:</strong> {{ tipo }}</div>
+  <div><strong>Rango de precio:</strong> {{ rango_precio }}</div>
+  <div><strong>Perfil de uso:</strong> {{ perfil }}</div>
+  <div><strong>Nuestro criterio:</strong> {{ criterio }}</div>
+</div>
+{{ table }}
+
+<section><h2>Los mejores {{ h1|lower }}</h2>
+{% for b in bloques %}<h3>{{ b.titulo }}</h3><p>{{ b.texto }}</p>{% endfor %}
+</section>
+
+<section><h2>Cómo elegir {{ h1|lower }}</h2>
+<p>{{ buyer_intro }}</p>
+<ul>{% for t in tips %}<li>{{ t }}</li>{% endfor %}</ul>
+
+<h3>Pros y contras</h3>
+<ul><li><strong>Ventajas:</strong> {{ pros }}</li><li><strong>Inconvenientes:</strong> {{ contras }}</li></ul>
+</section>
+
+<section><h2>Preguntas frecuentes</h2>
+{% for q,a in faqs %}<h3>{{ q }}</h3><p>{{ a }}</p>{% endfor %}
+</section>
+
+<nav class="muted"><p>También puede interesarte: {% for s,t in related %}<a href="{{ root }}{{ s }}/">{{ t }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p></nav>
+</article>
+{% if product_ld %}<script type="application/ld+json">{{ product_ld|safe }}</script>{% endif %}
+{% if faq_ld %}<script type="application/ld+json">{{ faq_ld|safe }}</script>{% endif %}
+{{ tail }}""")
+
+PAGE_TMPL = Template("""{{ head }}<article class="page"><h1>{{ h1 }}</h1>{{ body|safe }}</article>{{ tail }}""")
+
+def head_meta(title, desc, canonical, root, site_title):
+    return Template(BASE_HEAD).render(title_tag=title, meta_description=desc, canonical=canonical,
+                                      root=root, site_title=site_title)
+
+def tail_meta(disclosure, site_title):
+    return Template(TAIL).render(disclosure=disclosure, year=datetime.datetime.utcnow().year, site_title=site_title)
+
+def list_slugs():
+    out=[]
+    for root,_,files in os.walk("public"):
+        if "index.html" in files:
+            slug=root.replace("public","").strip("/")
+            out.append(slug)
+    return sorted(out)
+
+def write_static_pages(cfg):
+    write("static/style.css", STYLE)
+    head=head_meta(cfg["about"]["title"], "Información del proyecto", BASE_URL+"sobre/" if BASE_URL else "", BASE_PATH, cfg["site_title"])
+    body=f"<p>{cfg['about']['body']}</p><p><em>{cfg['legal']['disclosure']}</em></p>"
+    write("sobre/index.html", PAGE_TMPL.render(head=head, h1=cfg["about"]["title"], body=body, tail=tail_meta(cfg["legal"]["disclosure"], cfg["site_title"])))
+    head=head_meta("Contacto", "Cómo contactar", BASE_URL+"contacto/" if BASE_URL else "", BASE_PATH, cfg["site_title"])
+    body=f"<p>Escríbenos a <a href='mailto:{cfg['contact']['email']}'>{cfg['contact']['email']}</a>.</p>"
+    write("contacto/index.html", PAGE_TMPL.render(head=head, h1="Contacto", body=body, tail=tail_meta(cfg["legal"]["disclosure"], cfg["site_title"])))
+    head=head_meta("Información legal", "Política y términos", BASE_URL+"legal/" if BASE_URL else "", BASE_PATH, cfg["site_title"])
+    body=f"<h2>Aviso de afiliación</h2><p>{cfg['legal']['disclosure']}</p><h2>Privacidad</h2><p>{cfg['legal']['privacy']}</p><h2>Términos</h2><p>{cfg['legal']['terms']}</p>"
+    write("legal/index.html", PAGE_TMPL.render(head=head, h1="Información legal", body=body, tail=tail_meta(cfg["legal"]["disclosure"], cfg["site_title"])))
+
+def write_home(cfg, recent):
+    cats=[type("C",(),{"slug":c["slug"],"title":c["title"],"desc": (c["keywords"][0] if c.get("keywords") else "")}) for c in cfg["categories"]]
+    head=head_meta(cfg["site_title"], "Guías y comparativas camper", BASE_URL if BASE_URL else "", BASE_PATH, cfg["site_title"])
+    html=INDEX_TMPL.render(head=head, cats=cats, root=BASE_PATH, site_title=cfg["site_title"], recent=recent, tail=tail_meta(cfg["legal"]["disclosure"], cfg["site_title"]))
+    write("index.html", html)
+
+def write_sitemap_and_robots(base_url):
+    urls=[]; today=datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    for slug in list_slugs():
+        urls.append((base_url.rstrip("/") + ("/" if not slug else f"/{slug}/")) if base_url else ("/" if not slug else f"/{slug}/"))
+    sm=["<?xml version='1.0' encoding='UTF-8'?>","<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"]
+    sm+= [f"<url><loc>{u}</loc><lastmod>{today}</lastmod><changefreq>weekly</changefreq><priority>0.6</priority></url>" for u in urls]
+    sm.append("</urlset>")
+    write("sitemap.xml","\n".join(sm))
+    write("robots.txt", f"User-agent: *\nAllow: /\nSitemap: {(base_url.rstrip('/')+'/sitemap.xml') if base_url else '/sitemap.xml'}")
+
+# --------- Construcción de categoría -------
+def build_category(cfg, cat):
+    tag=cfg["amazon_partner_tag"]; access=cfg["amazon_access_key"]; secret=cfg["amazon_secret_key"]
+    items=[]; rows=""
+    if access and secret:
+        for kw in cat.get("keywords",[])[:3]:
+            try:
+                r=pa_search(tag, kw, access, secret, count=6)
+                items += r.get("ItemsResult",{}).get("Items",[])
+                time.sleep(0.4)
+            except Exception as e:
+                write("_logs/paapi_last_error.txt", f"{datetime.datetime.utcnow()}: {e}")
+    # dedup
+    seen=set(); uniq=[]
+    for it in items:
+        a=it.get("ASIN")
+        if a and a not in seen: uniq.append(it); seen.add(a)
+    items=uniq[:12]
+    if items:
+        rows = product_table(items, tag=tag)
+    else:
+        # Fallback a primera keyword (tabla nunca vacía)
+        seed = (cat.get("keywords") or ["producto camper"])[0]
+        rows = fallback_rows(seed, tag)
+    h1=cat["title"]; intro="Selección automática con datos de Amazon (si API activa)."
+    head=head_meta(h1, f"Comparativa de {h1}", BASE_URL+cat["slug"]+"/" if BASE_URL else "", BASE_PATH, CFG["site_title"])
+    html=CAT_TMPL.render(head=head, h1=h1, intro=intro, rows=rows, tail=tail_meta(CFG["legal"]["disclosure"], CFG["site_title"]))
+    write(f"{cat['slug']}/index.html", html)
+
+# --------- Redacción SEO programática -------
+def write_post_from_keyword(cfg, cat_slug, kw):
+    tag=cfg["amazon_partner_tag"]; access=cfg["amazon_access_key"]; secret=cfg["amazon_secret_key"]
+    slug=f"{cat_slug}/{slugify(kw)}"; h1=kw.title()
+
+    # Imagen local (nunca rota)
+    image = post_image_for(kw, slug.replace("/","-"))
+
+    # Tabla (real si hay PA-API; si no, fallback plausible)
+    product_json_ld = ""; table_html = ""
+    if access and secret:
+        try:
+            r=pa_search(tag, kw, access, secret, count=6)
+            items=r.get("ItemsResult",{}).get("Items",[])
+            if items:
+                table_html="<table class='table'><thead><tr><th>Producto</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+product_table(items, tag)+"</tbody></table>"
+                it=items[0]; link=f"https://www.amazon.es/dp/{it.get('ASIN','')}?tag={tag}"
+                price=it.get("Offers",{}).get("Listings",[{}])[0].get("Price",{}).get("DisplayAmount")
+                img=it.get("Images",{}).get("Primary",{}).get("Medium",{}).get("URL","")
+                product_json_ld = product_ld(h1, link, img, price)
+        except Exception as e:
+            write("_logs/paapi_last_error.txt", f"{datetime.datetime.utcnow()}: {e}")
+
+    if not table_html:
+        table_html="<table class='table'><thead><tr><th>Producto</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+fallback_rows(kw, tag)+"</tbody></table>"
+
+    # Redacción SEO (≈900–1200 palabras)
+    rango = price_range_for(kw)
+    intro = (f"En esta guía reunimos los mejores {h1.lower()} para furgoneta camper. "
+             f"La selección se actualiza a diario. Los precios mostrados son "
+             f"orientativos ({rango}); pulsa en «Ver opciones» para ver el importe exacto y disponibilidad en Amazon.")
+    tipo = ("Compresor" if "nevera" in kw.lower() else
+            "LiFePO4" if "bateria" in kw.lower() else
+            "Onda pura" if "inversor" in kw.lower() else "Recomendación general")
+    perfil = ("Viajes de varios días y autonomía sin camping" if "nevera" in kw.lower()
+              else "Instalaciones de 12 V exigentes" if "bateria" in kw.lower()
+              else "Uso con electrónica sensible" if "inversor" in kw.lower()
+              else "Uso habitual en furgonetas camper")
+    criterio = "Fiabilidad, consumo y reputación del fabricante"
+
+    # Bloques “Los mejores…”
+    variantes = gen_variants(kw)
+    bloques = []
+    for v in variantes[:4]:
+        t = (f"{v['name']} — por qué nos gusta")
+        txt = (f"{v['name']} destaca por su relación entre prestaciones y consumo. "
+               f"Entre sus puntos fuertes: {', '.join([re.sub('<.*?>','',x) for x in v['features'][:3]])}. "
+               f"Si buscas una opción equilibrada dentro del rango {rango}, es una apuesta segura.")
+        bloques.append(type("B",(),{"titulo":t,"texto":txt}))
+
+    buyer_intro = (f"A la hora de elegir {h1.lower()}, piensa en el uso real y en la energía disponible. "
+                   f"Un modelo sobredimensionado encarece y gasta más; uno justo se quedará corto en verano o en rutas largas.")
+
+    tips=[
+        "Calcula tu consumo diario y deja margen del 20–30 %.",
+        "Prioriza eficiencia (consumo Wh/día) y nivel de ruido si duermes con el equipo cerca.",
+        "Valora garantía, servicio técnico y repuestos disponibles en España.",
+        "Comprueba medidas exactas y tipo de instalación (empotrada, portátil, conexiones).",
+        "Lee opiniones recientes: confirman ruidos, vibraciones o picos de consumo."
+    ]
+    pros="Ahorro de tiempo al elegir, productos filtrados por especificaciones clave y buena reputación."
+    contras="Los precios varían: confírmalos siempre en la tienda antes de decidir."
+
+    # FAQs específicas
+    faqs=[
+        (f"¿Cuál es la mejor {h1.lower()} para empezar?", f"Un modelo de gama media con buena eficiencia y garantía. Revisa el rango {rango} y prioriza consumo y ruido."),
+        ("¿Cuánta capacidad necesito?", "Para dos personas de fin de semana, 30–45 L es suficiente; para viajes largos, 45–65 L."),
+        ("¿Afecta el enlace de afiliado al precio?", "No. El precio es el mismo para ti, y a nosotros nos ayuda a mantener el contenido."),
+        ("¿Cómo mantener el equipo en buen estado?", "Ventila, nivela y limpia juntas y filtros. Evita exponerlo al sol directo durante horas.")
+    ]
+    faq_json_ld = faq_ld_from_list(faqs)
+
+    # Relacionados (simple)
+    related=[]
+    for c in cfg["categories"]:
+        for k in c.get("keywords",[])[:1]:
+            s=f"{c['slug']}/{slugify(k)}"
+            if s!=slug: related.append((s, k.title()))
+        if len(related)>=3: break
+
+    head=head_meta(h1, f"Guía y comparativa de {h1}", BASE_URL+slug+"/" if BASE_URL else "", BASE_PATH, CFG["site_title"])
+    html=POST_TMPL.render(
+        head=head, h1=h1, updated=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+        image=image, intro=intro, tipo=tipo, rango_precio=rango, perfil=perfil, criterio=criterio,
+        table=table_html, bloques=bloques, buyer_intro=buyer_intro, tips=tips,
+        pros=pros, contras=contras, faqs=faxs := faqs, related=related,
+        product_ld=product_json_ld, faq_ld=faq_json_ld,
+        root=BASE_PATH, tail=tail_meta(CFG["legal"]["disclosure"], CFG["site_title"])
+    )
+    write(f"{slug}/index.html", html)
+    return slug, h1
+
+# --------- Construcción global ----------
 def product_table(items, tag):
     rows=[]
     for it in items:
@@ -230,51 +553,7 @@ def product_table(items, tag):
         img_html=(f'<img src="{img}" alt="{title}" width="64" height="64" loading="lazy" style="border-radius:8px;border:1px solid #2a2a2a">' if img else "")
         card="<div style='display:flex;gap:10px;align-items:flex-start'>"+img_html+f"<div><strong>{title}</strong>{bullets}</div></div>"
         rows.append(f"<tr><td>{card}</td><td><span class='bb-price'>{price}</span></td><td>{avail}</td><td><a class='bb-btn' rel='sponsored nofollow' target='_blank' href='{link}'>Comprar</a></td></tr>")
-    if not rows: return "<tr><td colspan='4'>Sin resultados hoy. Vuelve más tarde.</td></tr>"
-    return "\n".join(rows)
-
-def links_table(tag, keywords):
-    rows=[]
-    for kw in keywords[:6]:
-        link=f"https://www.amazon.es/s?k={quote(kw)}&tag={tag}"
-        rows.append(f"<tr><td><strong>{kw.title()}</strong></td><td>-</td><td>-</td><td><a class='bb-btn' rel='sponsored nofollow' target='_blank' href='{link}'>Ver opciones</a></td></tr>")
-    if not rows: return "<tr><td colspan='4'>Sin datos.</td></tr>"
-    return "\n".join(rows)
-
-def unsplash(term):
-    return f"https://source.unsplash.com/1000x600/?{quote('camper van,'+term)}"
-
-def product_ld(name, url, img, price):
-    data={"@context":"https://schema.org","@type":"Product","name":name}
-    if url: data["url"]=url
-    if img: data["image"]=img
-    if price and isinstance(price,str) and price not in ("Consultar","-"):
-        data["offers"]={"@type":"Offer","price":re.sub(r"[^0-9,\.]","",price).replace(",","."),"priceCurrency":"EUR","availability":"https://schema.org/InStock"}
-    return json.dumps(data, ensure_ascii=False)
-
-# ==================== PÁGINAS ====================
-def list_slugs():
-    out=[]
-    for root,_,files in os.walk("public"):
-        if "index.html" in files:
-            slug=root.replace("public","").strip("/")
-            out.append(slug)
-    return sorted(out)
-
-def write_static_pages(cfg):
-    write("static/style.css", STYLE)
-    # Sobre
-    head=head_meta(cfg["about"]["title"], "Información del proyecto", BASE_URL+"sobre/" if BASE_URL else "", BASE_PATH, cfg["site_title"])
-    body=f"<p>{cfg['about']['body']}</p><p><em>{cfg['legal']['disclosure']}</em></p>"
-    write("sobre/index.html", PAGE_TMPL.render(head=head, h1=cfg["about"]["title"], body=body, tail=tail_meta(cfg["legal"]["disclosure"], cfg["site_title"])))
-    # Contacto
-    head=head_meta("Contacto", "Cómo contactar", BASE_URL+"contacto/" if BASE_URL else "", BASE_PATH, cfg["site_title"])
-    body=f"<p>Escríbenos a <a href='mailto:{cfg['contact']['email']}'>{cfg['contact']['email']}</a>.</p>"
-    write("contacto/index.html", PAGE_TMPL.render(head=head, h1="Contacto", body=body, tail=tail_meta(cfg["legal"]["disclosure"], cfg["site_title"])))
-    # Legal
-    head=head_meta("Información legal", "Política y términos", BASE_URL+"legal/" if BASE_URL else "", BASE_PATH, cfg["site_title"])
-    body=f"<h2>Aviso de afiliación</h2><p>{cfg['legal']['disclosure']}</p><h2>Privacidad</h2><p>{cfg['legal']['privacy']}</p><h2>Términos</h2><p>{cfg['legal']['terms']}</p>"
-    write("legal/index.html", PAGE_TMPL.render(head=head, h1="Información legal", body=body, tail=tail_meta(cfg["legal"]["disclosure"], cfg["site_title"])))
+    return "\n".join(rows) if rows else ""
 
 def write_home(cfg, recent):
     cats=[type("C",(),{"slug":c["slug"],"title":c["title"],"desc": (c["keywords"][0] if c.get("keywords") else "")}) for c in cfg["categories"]]
@@ -282,74 +561,12 @@ def write_home(cfg, recent):
     html=INDEX_TMPL.render(head=head, cats=cats, root=BASE_PATH, site_title=cfg["site_title"], recent=recent, tail=tail_meta(cfg["legal"]["disclosure"], cfg["site_title"]))
     write("index.html", html)
 
-def write_sitemap_and_robots(base_url):
-    urls=[]
-    for slug in list_slugs():
-        urls.append((base_url.rstrip("/") + ("/" if not slug else f"/{slug}/")) if base_url else ("/" if not slug else f"/{slug}/"))
-    today=datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    sm=["<?xml version='1.0' encoding='UTF-8'?>","<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>"]
-    sm+= [f"<url><loc>{u}</loc><lastmod>{today}</lastmod><changefreq>weekly</changefreq><priority>0.6</priority></url>" for u in urls]
-    sm.append("</urlset>")
-    write("sitemap.xml","\n".join(sm))
-    write("robots.txt", f"User-agent: *\nAllow: /\nSitemap: {(base_url.rstrip('/')+'/sitemap.xml') if base_url else '/sitemap.xml'}")
-
-def build_category(cfg, cat):
-    tag=cfg["amazon_partner_tag"]; access=cfg["amazon_access_key"]; secret=cfg["amazon_secret_key"]
-    items=[]
-    if access and secret:
-        for kw in cat.get("keywords",[])[:3]:
-            try:
-                r=pa_search(tag, kw, access, secret, count=6)
-                items += r.get("ItemsResult",{}).get("Items",[])
-                time.sleep(0.5)
-            except Exception as e:
-                write("_logs/paapi_last_error.txt", f"{datetime.datetime.utcnow()}: {e}")
-    # dedup
-    seen=set(); uniq=[]
-    for it in items:
-        a=it.get("ASIN")
-        if a and a not in seen: uniq.append(it); seen.add(a)
-    items=uniq[:12]
-    rows = product_table(items, tag) if items else links_table(tag, cat.get("keywords",[]))
-    h1=cat["title"]; intro="Selección automática con datos de Amazon (si API activa)."
-    head=head_meta(h1, f"Comparativa de {h1}", BASE_URL+cat["slug"]+"/" if BASE_URL else "", BASE_PATH, CFG["site_title"])
-    html=CAT_TMPL.render(head=head, h1=h1, intro=intro, rows=rows, tail=tail_meta(CFG["legal"]["disclosure"], CFG["site_title"]))
-    write(f"{cat['slug']}/index.html", html)
-
-def write_post_from_keyword(cfg, cat_slug, kw):
-    tag=cfg["amazon_partner_tag"]; access=cfg["amazon_access_key"]; secret=cfg["amazon_secret_key"]
-    slug=f"{cat_slug}/{slugify(kw)}"; h1=kw.title()
-    image=""; price=None; table="<p>Sin datos hoy.</p>"; pld=""
-    if access and secret:
-        try:
-            r=pa_search(tag, kw, access, secret, count=6)
-            items=r.get("ItemsResult",{}).get("Items",[])
-            table="<table class='table'><thead><tr><th>Producto</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+product_table(items, tag)+"</tbody></table>"
-            if items:
-                it=items[0]
-                image=it.get("Images",{}).get("Primary",{}).get("Medium",{}).get("URL","") or ""
-                price=it.get("Offers",{}).get("Listings",[{}])[0].get("Price",{}).get("DisplayAmount")
-                link=f"https://www.amazon.es/dp/{it.get('ASIN','')}?tag={tag}"
-                pld=product_ld(h1, link, image, price)
-        except Exception as e:
-            write("_logs/paapi_last_error.txt", f"{datetime.datetime.utcnow()}: {e}")
-    if not image:
-        image = unsplash(kw)
-        table="<table class='table'><thead><tr><th>Búsqueda</th><th>Precio</th><th>Disponibilidad</th><th></th></tr></thead><tbody>"+links_table(tag,[kw,kw+' oferta',kw+' barato'])+"</tbody></table>"
-    tips=["Define presupuesto y tamaño.","Revisa garantía y repuestos.","Evita extras que no usarás."]
-    faqs=[("¿Cambian los precios?","Sí, Amazon los actualiza."),("¿Afecta el afiliado al precio?","No."),("¿Cómo elegimos?","Disponibilidad, reputación y especificaciones.")]
-    head=head_meta(h1, f"Guía: {h1}", BASE_URL+slug+"/" if BASE_URL else "", BASE_PATH, CFG["site_title"])
-    html=POST_TMPL.render(head=head, h1=h1, updated=datetime.datetime.utcnow().strftime("%Y-%m-%d"),
-                          intro="Comparativa generada automáticamente.", table=table, tips=tips, faqs=faqs,
-                          related=[], tail=tail_meta(CFG["legal"]["disclosure"], CFG["site_title"]),
-                          root=BASE_PATH, image=image, product_ld=pld)
-    write(f"{slug}/index.html", html)
-    return slug, h1
-
 def run_autodiscover(cfg):
+    # Home + categorías
     recent=[]
     for cat in cfg["categories"]:
         build_category(cfg, cat)
+    # Posts diarios
     n=int(cfg.get("auto_daily_new_posts",1))
     random.seed(datetime.datetime.utcnow().strftime("%Y%m%d"))
     pool=[(c["slug"],kw) for c in cfg["categories"] for kw in c.get("keywords",[])]
