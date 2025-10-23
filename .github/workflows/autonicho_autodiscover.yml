@@ -31,10 +31,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install jinja2 requests
 
-      - name: Write BOOTSTRAP_JSON to file
+      - name: Write BOOTSTRAP_JSON to file (safe)
+        env:
+          RAW: ${{ secrets.BOOTSTRAP_JSON }}
         run: |
           mkdir -p automation
-          printf '%s' "${{ secrets.BOOTSTRAP_JSON }}" > automation/bootstrap.json
+          python - <<'PY'
+          import os, pathlib
+          raw = os.environ.get('RAW','')
+          p = pathlib.Path('automation/bootstrap.json')
+          p.write_text(raw, encoding='utf-8')
+          print('Wrote', p, 'len=', len(raw))
+          PY
 
       - name: Generate site (AutoDiscover)
         env:
